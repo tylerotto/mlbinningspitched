@@ -2,7 +2,8 @@ library(tidyverse)
 library(sqldf)
 library(rvest)
 library(glue)
-
+library(hrbrthemes)
+library(lubridate)
 ###############
 
 
@@ -34,49 +35,55 @@ finaldf <- do.call(rbind, dfList)  %>%
 
 
 
-game_log_web <- read_html('https://www.baseball-reference.com/leagues/daily.fcgi?request=1&type=p&dates=lastndays&lastndays=100000')
+game_log_web <- read_html('https://www.baseball-reference.com/leagues/daily.fcgi?request=1&type=p&dates=lastndays&lastndays=200000')
 
 draft_table <- html_nodes(game_log_web, 'table')
 draft <- html_table(draft_table)[[1]] %>% 
   janitor::clean_names() %>% 
-  mutate(name = str_squish(name))
+  mutate(name = str_squish(name)) 
   
 
-# select(name, birth_year, gs, ip) %>% 
-library(lubridate)
 
-check <- inner_join(draft, finaldf, by = c('name'='player_name')) %>% 
+
+mlb_agg_data <- inner_join(draft, finaldf, by = c('name'='player_name')) %>% 
   mutate(across(8:so_w, as.numeric),
-         player_birth_year= year(mdy(birth_year))) %>% 
+         player_birth_year= floor_date(mdy(birth_year), unit= 'year')) %>% 
   filter(gs > 50) %>% 
   group_by(player_birth_year) %>% 
   summarise(innings_pitched_per_game = sum(ip)/sum(gs),
-            triples = sum(x3b)
-            )%>% 
-  arrange(desc(player_birth_year))
-
-check %>% 
-  ggplot(aes(x=player_birth_year, y =innings_pitched_per_game )) +
-  geom_line()
-
-
-
-###############
+            strikeouts_per_game = sum(so)/sum(gs)
+            ) %>% 
+  ungroup() %>% 
+  arrange(desc(player_birth_year)) %>% 
+  filter(player_birth_year >= 1960) %>% 
+  pivot_longer(cols = -player_birth_year,names_to = 'mlb_metric')
 
 
 
-inner_join(draft, finaldf, by = c('name'='player_name')) %>% 
-  select(birth_year) %>% 
-  mutate(date = year(mdy(birth_year)))
+# Load png package
+library("png")                  
+my_image <-  readPNG("C:\\Users\\theot\\Desktop\\Major_League_Baseball_MLB_transparent_logo.png", native = T)
+
+# Load patchwork in inset the MLB logo above
+library("patchwork") 
+library(scales)
 
 
-finaldf %>% 
-  distinct(player_name) %>% 
-  arrange(player_name)
+ts_mlb_plot <- mlb_agg_data %>% 
+  ggplot(aes(x=player_birth_year, y=value, color= mlb_metric)) +
+  geom_line(size = 1) +
+  # theme(panel.grid.minor = element_blank()) +
+  theme_ipsum_ps() +
+  ggtitle("Pitching Metrics by Pitcher's Birth Year") +
+  scale_x_date(date_breaks = "4 years", labels = date_format("%Y")) +
+  scale_y_continuous(breaks=seq(4,8,0.5)) +
+  scale_color_manual(name = 'Pitching Metric', 
+                     labels=c('Innings per game', 'Strikeouts per game'),
+                     values = c('darkred', 'darkblue')) +
+  xlab("Pitcher's Birth Year") +
+  ylab("") +
+  inset_element(p = my_image, 0.85, 0.85, 1, 1, align_to = 'full') 
 
-draft %>% 
-  distinct(name)%>% 
-  arrange(name)
+ts_mlb_plot
 
-
-
+ggsave('ts_mlb_plot.png')
